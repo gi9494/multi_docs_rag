@@ -1,0 +1,30 @@
+# The corpus: for every document, which pages contain the author's own text.
+# Everything outside this range (title pages, editor's introduction, chronology,
+# bibliography, glossary, indexes...) is left out of the chunks.
+# The ranges are set by hand after looking at the trees in data/trees/:
+# a few numbers, visible to everyone, instead of a fragile automatic guess.
+#
+# Keys are the PDF file names without ".pdf".
+# Optional "exclude": sections to leave out, by title (the title only has to start with it).
+
+documents:
+  an_enquiry_concerning_the_principles_of_morals:
+    author: Hume
+    title: An Enquiry Concerning the Principles of Morals
+    pages: [2, 74]         # Sections I-IX + four appendices (all by Hume); p. 1 is the title page
+
+  kant1785:
+    author: Kant
+    title: Groundwork for the Metaphysic of Morals
+    pages: [2, 53]         # Preface .. Chapter 3; p. 1 is the title page
+
+  jsmill-utilitarianism:
+    author: Mill
+    title: Utilitarianism
+    pages: [5, 117]        # Chapter I .. Chapter V; before: title and contents
+    exclude: [Endnotes]    # the endnotes start on the last page of Chapter V
+
+  "Nietzsche - On the Genealogy of Morality":
+    author: Nietzsche
+    title: On the Genealogy of Morality
+    pages: [37, 154]       # Preface + three essays; before: editor's material, after: supplementary texts and indexes

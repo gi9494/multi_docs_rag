@@ -14,13 +14,15 @@ Four classics of moral philosophy, each answering *what makes an action good?* d
 
 | Document | Author | Answer in one word |
 |---|---|---|
-| Nicomachean Ethics | Aristotle | virtue |
+| An Enquiry Concerning the Principles of Morals | Hume | sentiment |
 | Groundwork of the Metaphysics of Morals | Kant | duty |
 | Utilitarianism | J. S. Mill | consequences |
 | On the Genealogy of Morality | Nietzsche | critique of morality itself |
 
+Hume and Kant answer each other directly, Mill builds on both, Nietzsche attacks all of them.
+
 Same topics, different positions, different words for the same idea
-(*happiness*, *eudaimonia*, *utility*): a natural testbed for cross-document questions.
+(*happiness*, *utility*, *pleasure*, *well-being*): a natural testbed for cross-document questions.
 
 ## Methodology
 
@@ -60,17 +62,17 @@ its text, its origin (`native` / `ocr`) and its score.
 
 | Document | Pages | Kept as is | OCR | Low score, original kept | Mean score |
 |---|---|---|---|---|---|
-| Aristotle | 274 | 267 | 1 | 6 | 0.98 |
-| Nietzsche | 229 | 228 | – | 1 | 0.99 |
+| Hume | 74 | 74 | – | – | 0.99 |
+| Nietzsche | 229 | 228 | 1 | – | 0.99 |
 | Mill | 121 | 120 | 1 (scanned page) | – | 1.00 |
 | Kant | 53 | 53 | – | – | 1.00 |
 
 All four PDFs are born-digital: OCR was almost never needed, and the pipeline recognised it on its own.
 
 **Known limitation:** the score measures how *English* a page is, not how *correct* it is.
-A page of Nietzsche quoting Tertullian in Latin scores 0.78 while being perfectly fine.
-OCR reads the same Latin and scores the same, so the original is kept:
-OCR replaces existing text only if it scores clearly better (+0.05).
+A page of Nietzsche quoting Tertullian in Latin scores 0.78 while being perfectly fine, so it is sent
+to OCR and stays flagged as low quality in the report. To limit the damage, OCR replaces existing text
+only if it scores clearly better (+0.05).
 
 ### 2. Document structure
 
@@ -104,20 +106,162 @@ Documents are processed one at a time.
   (low for a local model, higher for a cloud one).
 - *Built once, cached*: trees are saved and reused.
 
+### 3. Cleaning and semantic chunking
+
+**Goal:** turn the trees into the final pieces of text (*chunks*) that will become the nodes of the graph.
+
+PageIndex's leaves are the natural chunks: each is a section the author wrote as a unit.
+Two things still have to be handled.
+
+**Cleaning the tree**
+
+- *Only the author's text.* Editors' introductions, chronologies, bibliographies and indexes are left out.
+  The pages of the author's text (and any section to skip, e.g. Mill's endnotes) are set by hand in
+  `corpus.yaml` (a few lines, visible to everyone):
+  an automatic guess proved unreliable, e.g. a summariser attributing a bibliography to Nietzsche.
+- *Only the body text.* Footnotes (printed smaller than the main text), running heads repeated at the top of
+  most pages and page numbers are dropped: otherwise "47 P. Mérimée, Lettres à une inconnue…" would end up
+  in the middle of Nietzsche's argument, and look to the chunker like a change of topic.
+- *No text twice, no text lost.* Each section starts exactly where its title appears in the text, not at the
+  start of its page, so two sections never share a page. Duplicated nodes are merged, and the text a chapter
+  has before its first sub-section becomes a piece of its own (in Kant, 22 pages of Chapter 2 were in no leaf).
+
+**Semantic chunking: splitting only where the topic changes**
+
+Some leaves are very long (Mill's Chapter V: 42 pages; Nietzsche's Third Essay: 53) because the books have no
+finer headings. One embedding for 50 pages is a blurred average of many ideas. Instead of cutting every N pages,
+we cut where the *meaning* changes:
+
+1. the section is split into sentences; each sentence, together with its neighbours, gets an embedding;
+2. we measure how much the meaning changes from one sentence to the next;
+3. we cut at the biggest changes: those in the top 5% of the **whole corpus**.
+   A section about a single topic has no such change and stays whole, however long it is.
+
+Two limits: no chunk shorter than ~half a page (too little context), none longer than the embedding model can read.
+Chunks keep their place in the tree ("Third essay, part 3 of 12") and their page numbers, for citations.
+
+**The one parameter** is the percentile (95): lower means more cuts and smaller chunks. Its effect is reported below.
+
+### 4. The graph
+
+**Goal:** put the whole corpus in one graph, so that documents, their structure and their text can be
+explored together, and graph algorithms can run on it.
+
+Each document becomes a small tree inside [Neo4j](https://neo4j.com):
+
+```
+(Document: Kant) -[:HAS_SECTION]-> (Section: Chapter 2) -[:HAS_SECTION]-> (Section: The autonomy of the will)
+                                                                     -[:HAS_CHUNK]-> (Chunk: kant-0031)
+(Chunk: kant-0030) -[:NEXT]-> (Chunk: kant-0031)          reading order
+```
+
+- **Document**: author and title.
+- **Section**: a node of the PageIndex tree, with its pages and its summary.
+- **Chunk**: a piece of text from step 3, with its pages (for citations).
+
+At this point the four documents are four separate trees: nothing links Kant to Mill yet.
+The links between documents come in the next step, from the meaning of the chunks.
+
+![Kant's Groundwork in Neo4j](docs/images/graph_kant.png)
+
+*Kant's Groundwork in Neo4j: the document (purple), its chapters and sections (blue), the chunks (orange),
+linked in reading order by `NEXT`.*
+
+**Exploring the graph.** Open http://localhost:7474 and try these queries (Cypher, Neo4j's query language):
+
+```cypher
+// 1. What is in the database
+MATCH (n) RETURN labels(n)[0] AS type, count(*) AS how_many
+
+// 2. The picture above: one book as a tree
+MATCH p = (:Document {author: "Kant"})-[:HAS_SECTION*]->(:Section)-[:HAS_CHUNK]->(:Chunk)
+RETURN p
+
+// 3. The table of contents of a book, with pages
+MATCH (:Document {author: "Mill"})-[:HAS_SECTION*]->(s:Section)
+RETURN s.depth, s.title, s.start_page, s.end_page ORDER BY s.start_page
+
+// 4. Read a section, chunk by chunk
+MATCH (s:Section)-[:HAS_CHUNK]->(c:Chunk)
+WHERE s.title STARTS WITH "How is a categorical imperative possible"
+RETURN c.id, c.start_page, c.text ORDER BY c.id
+
+// 5. Where does a chunk come from? (book > chapter > section)
+MATCH p = (d:Document)-[:HAS_SECTION*]->(:Section)-[:HAS_CHUNK]->(:Chunk {id: "kant-0031"})
+RETURN [x IN nodes(p) | coalesce(x.title, x.name)] AS breadcrumb
+
+// 6. Keep reading: the next three chunks
+MATCH p = (:Chunk {id: "kant-0031"})-[:NEXT*1..3]->(:Chunk)
+RETURN p
+
+// 7. A first hint of cross-document questions: who talks about happiness, and how much?
+MATCH (c:Chunk) WHERE toLower(c.text) CONTAINS "happiness"
+RETURN c.author, count(*) AS chunks ORDER BY chunks DESC
+```
+
+Query 7 finds words, not ideas: Hume's *utility*, Mill's *pleasure* and Kant's *inclination* are missed.
+Linking chunks by meaning is the job of the next step.
+
 ## Getting started
 
-Requirements: Python 3.11+ and an LLM, either
+### Requirements
 
-- local: [Ollama](https://ollama.com) with the model pulled (`ollama pull gemma3:4b`), or
-- cloud: an API key of any LiteLLM provider, e.g. Gemini.
+- **Python 3.11+**
+- **Docker**, any runtime that provides the `docker` command
+  (Docker Desktop, Rancher Desktop, Colima…): it runs the graph database.
+- **An LLM**, either
+  - local: [Ollama](https://ollama.com) with the model pulled (`ollama pull gemma3:4b`), or
+  - cloud: an API key of any LiteLLM provider, e.g. Gemini.
+
+### 1. Python environment
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-cp .env.example .env              # choose the LLM here: LLM_MODEL (+ API key if cloud)
+cp .env.example .env     # then edit it: LLM_MODEL (+ API key if cloud), NEO4J_PASSWORD
+```
 
+### 2. Graph database: Neo4j + Graph Data Science
+
+[Neo4j](https://neo4j.com) stores the documents as a graph (sections, chapters, similarity links);
+its [Graph Data Science](https://neo4j.com/docs/graph-data-science/current/) plugin runs the
+graph algorithms (community detection) inside the database. Both run in Docker:
+
+```bash
+docker compose up -d     # first start: downloads Neo4j and the GDS plugin
+```
+
+Then open **http://localhost:7474** (user `neo4j`, password from `.env`) and check that GDS is loaded:
+
+```cypher
+RETURN gds.version()
+```
+
+The data lives in `data/neo4j/` and survives restarts (`docker compose down` / `up -d`).
+
+### 3. Local LLM (only if you use Ollama)
+
+Some steps send many pages at once to the model, so give Ollama a longer context than its default:
+
+```bash
+ollama pull gemma3:4b
+ollama pull nomic-embed-text
+OLLAMA_CONTEXT_LENGTH=32768 ollama serve
+```
+
+### 4. Your documents
+
+Put your PDFs in `data/raw/` (not committed to git) and describe them in `corpus.yaml`:
+for each file, the author, the title and the pages that contain the author's own text.
+`corpus.yaml` can be written by hand or drafted by an LLM from the trees of step 2.
+
+### 5. Run the pipeline
+
+```bash
 # put the PDFs in data/raw/, then
-python -m xdocqa.pdf_conversion   # step 1
-python -m xdocqa.structure        # step 2
+python -m xdocqa.pdf_conversion   # step 1: PDF conversion
+python -m xdocqa.structure        # step 2: document structure
+python -m xdocqa.chunking         # step 3: cleaning and semantic chunking
+python -m xdocqa.graph            # step 4: load the graph into Neo4j
 ```

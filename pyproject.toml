@@ -15,6 +15,11 @@ dependencies = [
     # step 2: document structure
     "pageindex>=0.2.19",
     "python-dotenv>=1.0",
+    # step 3: cleaning and semantic chunking
+    "pyyaml>=6.0",
+    "litellm>=1.97",
+    # step 4: graph database
+    "neo4j>=5.20",
 ]
 
 [build-system]

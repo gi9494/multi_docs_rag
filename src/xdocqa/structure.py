@@ -42,6 +42,9 @@ MIN_LEAVES = 3  # fewer leaves than this = flash found no real structure
 # how many summaries PageIndex may ask the LLM at the same time (flash mode).
 # Keep it low with a local model: Ollama answers one request at a time anyway.
 LLM_CONCURRENCY = int(os.getenv("LLM_CONCURRENCY", "2"))
+# seconds before a single LLM call is abandoned. LiteLLM's default (600) is too short for a
+# large local model reading many pages at once.
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "1800"))
 
 
 # ------------------------------------------------------------------ progress
@@ -55,6 +58,7 @@ class LLMProgress:
 
     def __init__(self):
         import litellm
+        litellm.request_timeout = LLM_TIMEOUT  # applies to every call PageIndex makes
         self.reset()
         litellm.success_callback.append(self.on_success)
         litellm.failure_callback.append(self.on_failure)

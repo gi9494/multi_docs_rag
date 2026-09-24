@@ -1,0 +1,30 @@
+# Neo4j graph database with the Graph Data Science (GDS) plugin.
+#
+#   docker compose up -d      start it (in the background)
+#   docker compose logs -f    watch what it is doing (Ctrl+C to stop watching)
+#   docker compose down       stop it (the data stays in data/neo4j/)
+#
+# Browser UI:  http://localhost:7474   (user: neo4j, password: NEO4J_PASSWORD in .env)
+# Python:      bolt://localhost:7687
+
+services:
+  neo4j:
+    # 5.26 = long-term-support version. Pinned to 5.26.13 because it is the newest one listed as
+    # compatible with the GDS plugin (2.13.7): a GDS jar only loads on the Neo4j versions it supports.
+    image: neo4j:5.26.13-community
+    container_name: xdocqa-neo4j
+    ports:
+      - "7474:7474"                    # web interface (graph visualisation)
+      - "7687:7687"                    # connection used by Python
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}          # read from .env (at least 8 characters)
+      # GDS is downloaded automatically at first start. If that download is blocked (e.g. by a
+      # corporate proxy), put neo4j-graph-data-science-2.13.7.jar in data/neo4j/plugins/ by hand.
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: gds.*
+      NEO4J_dbms_security_procedures_allowlist: gds.*
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 1G
+    volumes:
+      - ./data/neo4j/data:/data        # the database files: survive restarts, never committed
+      - ./data/neo4j/plugins:/plugins  # the GDS plugin, downloaded once
