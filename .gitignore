@@ -1,0 +1,9 @@
+# data can always be rebuilt: never commit it
+data/
+logs/
+
+.env
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
