@@ -20,6 +20,8 @@ dependencies = [
     "litellm>=1.97",
     # step 4: graph database
     "neo4j>=5.20",
+    # step 5: similarity
+    "matplotlib>=3.8",
 ]
 
 [build-system]
